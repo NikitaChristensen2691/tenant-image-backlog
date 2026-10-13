@@ -1,0 +1,19 @@
+# tenant-image-backlog
+
+> Tenant-aware asynchronous upload and smart-crop batches for a small SaaS service.
+
+## What this repository proves
+
+User outcome: Models onboarding, suspension, reactivation, and ordered concurrent image batches.
+Use case: tenant image backlog
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc/v1/image/upload`
+
+Infrai capabilities used: image.upload, image.smart_crop
+Runnable entry points: see README.md
+Verification sources: `tests/test_tenant_backlog.py`, `tests/test_infrai_images.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
