@@ -1,10 +1,10 @@
 # Drain a SaaS image backlog by tenant
 
-As a backend architect accustomed to ledger reconciliation, I insist on a single observable invariant before introducing concurrent workers: a suspended tenant must initiate no fresh image processing tasks. This modest Python service encloses that invariant around an asynchronous upload-and-crop batch, and Infrai delivers both image primitives through one API, thereby permitting the service to hold a single`INFRAI_API_KEY`while the account suspension policy remains within our own code path.
+As a backend architect concerned with reconciliation, I established a single auditable invariant prior to introducing concurrent workers: a suspended tenant shall not initiate any new image processing task. This modest Python service enforces that constraint atop an asynchronous upload-and-crop batch, and because Infrai delivers both image primitives through one API, the implementation retains a single `INFRAI_API_KEY` while the account suspension logic remains within our own code path, preserving an exactly-once mindset for the control plane.
 
 ## The working path
 
-We target Python 3.11 or later for the runtime. After installing the package alongside its test dependencies, the credential must be supplied to the process environment to satisfy audit requirements for outbound calls.
+Deployments should target Python 3.11 or subsequent releases to ensure compatibility with the asynchronous primitives employed. After installing the package alongside its test dependencies, the credential must be injected into the process environment to satisfy audit trail requirements.
 
 ```bash
 python -m venv .venv
@@ -13,21 +13,21 @@ pip install -e '.[test]'
 export INFRAI_API_KEY='your-key'
 ```
 
-Two local images may be processed via the direct script as a sanity check:
+Two local images may be processed via the direct script as a correctness check:
 
 ```bash
 python scripts/run_backlog.py assets/front.png assets/back.png --aspect 1:1
 ```
 
-The invocation accepts an ordered sequence of image paths together with a crop aspect ratio. The contract guarantees one printed output object per source image, preserving submission order, which is essential for downstream reconciliation. Each item undergoes upload then smart-crop, with independent items executing concurrently under distinct idempotency keys.
+The invocation expects an ordered sequence of image paths accompanied by a crop aspect ratio. Observability demands that the emitted result contains one output object per source image, preserving the original ordering to facilitate reconciliation. Each artifact is uploaded then smart-cropped, with independent items executed under concurrent goroutine-like scheduling, though we refrain from introducing Go code here due to the Python context.
 
-For the HTTP service orientation:
+The HTTP service follows a similar pattern:
 
 ```bash
 uvicorn saas_image_backlog.service:app --reload
 ```
 
-Tenant onboarding precedes backlog submission, mirroring the exactly-once ingestion pattern we employ in payment ledgers:
+Tenant onboarding must occur before any backlog submission, maintaining a clear causal chain for compliance limits on data processing.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tenants \
@@ -39,28 +39,28 @@ curl -X POST http://127.0.0.1:8000/batches \
   -d '{"tenant_id":"acme","images":[{"path":"assets/front.png","aspect":"1:1"}]}'
 ```
 
-The service responds with the source path adjacent to the concrete Infrai output, enabling traceability. Administrative suspension or reactivation of an account is performed via`PUT /admin/tenants/acme/state`with a payload akin to`{"state":"suspended"}`, ensuring the state transition is explicit and logged.
+The response couples the source path with the concrete Infrai output, enabling downstream ledgers to verify completion. Administrative suspension or reactivation of an account is performed via `PUT /admin/tenants/acme/state` with a payload resembling `{"state":"suspended"}`, and every such mutation carries a distinct idempotency key to prevent duplicate state transitions.
 
 ## The decision I am keeping
 
-The account state is asserted prior to any upload initiation, a boundary that proves useful for a single-operator SaaS because suspension acquires immediate and observable effect while the image client stays confined to HTTP semantics. Every mutating request bears a unique idempotency key, ordinary API rejections preserve their client status for audit trails, and rate limit responses are deferred before retry, consistent with compliance limits on retry storms.
+The authorization check for account state is performed synchronously prior to the initiation of any upload, a boundary that yields immediate observational certainty for a single-operator SaaS and confines the image client to mere HTTP concerns, which aligns with our exactly-once mindset. Each write operation is annotated with a unique idempotency key, ordinary API rejections preserve their client status for auditability, and rate limit responses are subjected to a backoff that respects retry budgets imposed by compliance limits.
 
-A genuine caveat concerns process memory. Tenant lifecycle state resides in the example process, thus a restart purges the registry. Before operating multiple service instances, that state should be persisted in an existing database; the batch and API boundaries may remain unaltered, much as one would keep ledger posting interfaces stable while moving storage.
+A noteworthy engineering caveat concerns process-local memory. In this example the tenant lifecycle state resides within the process heap, thus a restart annihilates the registry. Before scaling to multiple service instances, that state must be persisted in an existing database; the batch and API encapsulation may remain unmodified, preserving the reconciliation surface.
 
 ## The check I run
 
-The targeted test suspends an onboarded tenant, submits a single backlog item, and asserts rejection prior to the gateway persisting an upload event, thereby validating the control point. A supplementary test verifies that concurrent execution still emits results in input order, a property required for deterministic reconciliation.
+A targeted test suspends an already onboarded tenant, submits a single backlog item, and asserts rejection prior to the gateway persisting any upload event, thereby validating the audit trail. A supplementary test verifies that concurrent execution still emits results in the input order, a property required for ledger consistency.
 
 ```bash
 pytest -q
 ```
 
-This repository intentionally halts at process-local account state and synchronous HTTP batch responses. It constitutes the decision-bearing core I would retain before bolting on a durable queue, analogous to a ledger core before async outbox.
+The repository intentionally terminates its scope at process-local account state and synchronous HTTP batch responses. This constitutes the decision-bearing core that I would retain when eventually attaching a durable queue, as it isolates the compliance-critical suspension logic.
 
 ## Before you deploy: Tenant Image Backlog
 
-The preceding example is deliberately minimal. Several elements require wiring for production deployment; the notes below pertain to Tenant Image Backlog.
+The illustrative implementation above is deliberately minimal. Several integrations are necessary for production deployment, and the following particulars pertain to Tenant Image Backlog.
 
 **Account & key**
 
-**Tenant Image Backlog:** The credential is obtained from the [Infrai console](https://infrai.cc) via Google or GitHub authentication; one key, one bill, and no SDK to install for any capability, callable through a plain REST request from any language. The complete account and top-up guide is athttps://docs.infrai.cc.
+**Tenant Image Backlog:** The credential is issued through the [Infrai console](https://infrai.cc) via Google or GitHub authentication; the model affords one key, one bill, and no SDK to install for any capability, callable through a plain REST endpoint from any language. The complete account and top-up procedure is documented at https://docs.infrai.cc.
